@@ -1,426 +1,243 @@
-# Apple Watch + OpenClaw Health Adviser
+# 🦌 小鹿 · Apple Watch 健康助手
 
-## 初衷：
-- Apple Watch 戴了用了，每天采集几百个数据点——HRV、血氧、睡眠、静息心率、步数......
-然后呢？
-- 打开 iPhone 健康 app，看一眼「昨晚睡了 7 小时」，关掉。数据采了，但没人帮你分析。
-如果有了一套「健康数据管线」—每天早上自动分析数据，推送报告到手机。
-真的，只有四个字：物尽其用。
+> 你的 AI 健康小伙伴，每天早 8 点准时报到，帮你读懂自己的身体。
 
-![健康管线效果图：Apple Watch 数据 → 分析 → Telegram 推送](docs/images/original-vision-demo.jpg)
-
-- 🏗️ 这套系统能干嘛？一句话：让你的 Apple Watch 从「手环」变成「健康管家」
-📊 自动采集 | 🧠 智能分析 | 📈 趋势追踪
-🔔 自动推送 | 🍚 饮食记录 | 🚨 异常告警
-
-![Telegram收到最终报告效果](docs/images/telegram-final-report.png)
-![健康报告效果图2](docs/images/health-record2.jpg)
-
-
-从零搭建一条可运行的健康数据闭环：
-
-- iOS `Health Auto Export` 自动导出 JSON
-- Cloudflare Worker 鉴权 + 过滤 + 截断 + 入库 GitHub
-- OpenClaw Agent 定时 `git pull` 分析打分
-- 自动生成结构化健康报告（告警/趋势/运动/饮食交叉）
-- 自动推送 Telegram/discord/飞书等
-
-> 目标：**可读、可执行、可复盘、可扩展**。
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Built with OpenClaw](https://img.shields.io/badge/Built%20with-OpenClaw-purple)](https://openclaw.ai)
+[![Data: Apple Watch](https://img.shields.io/badge/Data-Apple%20Watch-black?logo=apple)](https://www.apple.com/apple-watch/)
+[![Channel: Hi](https://img.shields.io/badge/Push-小红书%20Hi-ff2442)](https://www.xiaohongshu.com)
 
 ---
 
-## ⚡ 0. 5分钟快速启动
+## 小鹿是什么
 
-1. 准备私有数据仓（例如 `data_sync_analysis`）和 iOS Auto Export（JSON + POST + `X-Auth-Key`）。
-2. 在 `cloudflare_worker/wrangler.toml` 填 `GITHUB_OWNER/GITHUB_REPO`，并设置 secrets：
-   - `INGEST_KEY`
-   - `GITHUB_TOKEN`
-3. `wrangler deploy` 后拿到 URL（或绑定自定义域）。
-4. 在 Agent 主机配置 `/root/.health_pipeline.env`（仓库、PAT、Telegram）。
-5. 执行：
+小鹿是一个跑在 [OpenClaw](https://openclaw.ai) 上的个人 AI 助手，专注**健康数据分析**。
+
+它每天从你的 Apple Watch 读取数据，用你能看懂的语言告诉你身体状态——不装医生，不说废话，像朋友一样聊。
+
+```
+Apple Watch
+    ↓  每周导出
+iPhone 健康 App → health-export.zip
+    ↓  mac_push_health.sh
+GitHub 私有数据仓（xiaolu-data）
+    ↓  心跳触发
+OpenClaw · 小鹿分析引擎
+    ↓  每天 08:00
+小红书 Hi → 你的手机
+```
+
+---
+
+## ✨ 功能
+
+### 💓 每日健康报告
+每天早 8 点自动分析，推送到小红书 Hi：
+
+```
+🦌 早安！今天是 03/29 周日
+
+━━━━━━━━━━━━━━━━━━
+💓 HRV   43.9ms  ← 比基线高 +12ms 🟢
+❤️  静息心率  74bpm  ← 正常范围
+👟 步数   8,234步  ← 昨日
+😴 睡眠   未佩戴
+━━━━━━━━━━━━━━━━━━
+节律评分：B+（80分）
+
+今天状态不错，09:00-10:00 是你的黄金时段
+适合安排需要专注的工作～
+```
+
+### 📈 节律分析
+根据历史 HRV 数据，找出你的**最佳时段**和**低谷时段**：
+
+| 时段 | HRV均值 | 状态 |
+|------|---------|------|
+| 09:00-10:00 | 47ms | 🟢 黄金时段 |
+| 17:00-18:00 | 43ms | 🟢 次优 |
+| 12:00-13:00 | 24ms | 🔴 低谷，避免重要决策 |
+| 20:00-21:00 | 27ms | 🟡 恢复中 |
+
+### 🗓️ 会议室一键预订
+直接跟小鹿说，它去搞定：
+
+```
+你：帮我订明天下午4点会议室
+小鹿：✅ 已订 26F·2603摄影（3人间）
+      会议 ID：6076893
+```
+
+### 📚 待读清单
+发链接给小鹿，它帮你：
+- 自动解析摘要（1-2句）
+- 问你目的（项目/赛道/感兴趣）
+- 定时提醒（上午收→12点提醒，下午收→16点提醒）
+- 附带全网同赛道参考阅读 3 条
+
+### 🧠 记忆功能
+```
+你：记下来，今天喝了2L水
+小鹿：记住了，明天报告里提醒你 ✓
+```
+
+---
+
+## 🏗️ 架构
+
+```
+┌─────────────────────────────────────────────────────┐
+│                     小鹿系统                          │
+├──────────────┬──────────────────┬────────────────────┤
+│  数据层       │   分析层          │   推送层            │
+│              │                  │                    │
+│ Apple Watch  │ analyze_health   │ OpenClaw           │
+│     ↓        │       .py        │   message tool     │
+│ iPhone 健康  │                  │      ↓             │
+│     ↓        │ ・HRV 基线       │ 小红书 Hi           │
+│ 每周手动导出  │ ・节律评分        │                    │
+│     ↓        │ ・状态判断        │                    │
+│ GitHub       │ ・个性化建议      │                    │
+│ xiaolu-data  │                  │                    │
+└──────────────┴──────────────────┴────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│                   Skills 体系                         │
+├────────────────┬────────────────┬────────────────────┤
+│ xiaolu-adviser │ xiaolu-meeting │ xiaolu-readlist    │
+│ 健康分析报告    │ 会议室预订      │ 待读清单提醒         │
+└────────────────┴────────────────┴────────────────────┘
+```
+
+---
+
+## 📁 目录结构
+
+```
+xiaolu-health/
+├── scripts/
+│   ├── analyze_health.py      # 核心分析引擎
+│   ├── parse_health_xml.py    # Apple Health XML 解析
+│   ├── mac_push_health.sh     # Mac 端一键推送脚本
+│   ├── log_meal.py            # 饮食记录
+│   ├── memory_notes.py        # 备忘/提醒管理
+│   └── update_and_report.sh   # 更新并立即生成报告
+├── skills/
+│   ├── xiaolu-adviser/        # 健康报告 Skill
+│   ├── xiaolu-meeting/        # 会议室预订 Skill
+│   └── xiaolu-readlist/       # 待读清单 Skill
+├── docs/
+│   └── PRD.md                 # 产品需求文档
+└── README.md
+```
+
+---
+
+## 🚀 快速开始
+
+### 前置条件
+- Apple Watch（任意型号）
+- iPhone + Apple 健康 App
+- Mac（用于导出数据）
+- [OpenClaw](https://openclaw.ai) 账号
+- GitHub 账号（存放数据）
+
+### 1. Fork 仓库
 
 ```bash
-set -a; source /root/.health_pipeline.env; set +a
-/root/applewatch-openclaw-health-adviser/openclaw_agent/pull_and_score.sh
+# Fork 本仓库到你的账号
+# 同时创建私有数据仓库
+gh repo create your-name/xiaolu-data --private
 ```
 
-6. 验收：确认生成 `data/report/*.json|*.md` 且 Telegram 收到报告。
+### 2. 配置环境变量
 
-### 快速入口
+在 OpenClaw workspace 的 `openclaw.json` 中配置：
 
-- 运行手册（部署/验收/排障）：[`docs/runbook.md`](docs/runbook.md)
-- 常见问题（错误码/修复）：[`docs/faq.md`](docs/faq.md)
-- HRV 评分口径与科学依据：[`docs/hrv_scoring_validation.md`](docs/hrv_scoring_validation.md)
-- 评分体系全量科学依据（时长/规律/时机/恢复）：[`docs/scoring_scientific_basis.md`](docs/scoring_scientific_basis.md)
-
----
-
-## 1. 架构总览
-
-```mermaid
-flowchart TD
-    A[iPhone Health + Apple Watch] -->|Auto Export JSON POST| B[Cloudflare Worker]
-    B -->|Whitelist + Truncate + Auth| C[(GitHub Data Repo)]
-    D[OpenClaw Agent Host] -->|systemd timer pull| C
-    D --> E[analyze_latest.py]
-    E --> F[generate_health_report.py]
-    F --> G[daily_health_report.md / insights.json]
-    F --> H[notify_telegram.py]
-    H --> I[Telegram]
+```json
+{
+  "channels": {
+    "hiredcity": {
+      "userId": "your@xiaohongshu.com"
+    }
+  }
+}
 ```
 
----
-
-## 2. 仓库角色（强烈建议分层）
-
-- **代码仓（公开）**：本仓库（pipeline 代码 + 文档）
-- **数据仓（私有）**：仅存健康数据与报告产物（`latest.json` / `archive` / `report`）
-
-这样可避免隐私数据或敏感配置泄露。
-
----
-
-## 3. 目录结构
-
-```text
-cloudflare_worker/
-  index.js               # Worker: ingest/filter/truncate/write GitHub
-  wrangler.toml          # Worker 配置模板（无密钥）
-
-openclaw_agent/
-  pull_and_score.sh      # 一键 pull + 分析 + 报告 + Telegram
-  run_health_pipeline_once.sh # 带锁的一次执行入口（systemd 调用）
-  run_health_reconcile_once.sh # 带锁的一次对账入口
-  log_meal_from_text.sh  # 自然语言“记饮食：...”固定入口（含写入校验）
-  analyze_latest.py      # 节律评分输入构建与计算
-  generate_health_report.py # 结构化健康报告 + 告警 + 周月趋势 + 饮食交叉
-  enrich_report_meta.py  # 评分来源/新鲜度/连续fallback元数据
-  reconcile_health_ingest.py # manifest/archive/latest 对账
-  notify_telegram.py     # Telegram 推送
-  diet_log_template.csv  # 精确营养录入模板
-  meal_text_log_template.csv # 自然语言餐食录入模板
-
-systemd/
-  health-pipeline.service
-  health-pipeline.timer
-  health-reconcile.service
-  health-reconcile.timer
-```
-
----
-
-## 4. 先决条件
-
-- iPhone 安装 `Health Auto Export`
-- Cloudflare 账号（Workers）
-- GitHub 账号（可创建私有数据仓）
-- OpenClaw Agent 主机（Linux/macOS 均可）
-- 主机工具：`python3(>=3.10)` `git` `systemd` `node(>=20)/npm` `wrangler(4.74.0)`
-
----
-
-## 5. 密钥管理（统一走 env / secret）
-
-**绝不入仓库**：
-
-- `INGEST_KEY`
-- `GITHUB_TOKEN`
-- `CLOUDFLARE_API_TOKEN`
-- `TELEGRAM_BOT_TOKEN`
-
-推荐：
-
-- Worker 内密钥 -> `wrangler secret put`
-- 系统脚本密钥 -> `/root/.health_pipeline.env`（`chmod 600`）
-
----
-
-## 6. 从零部署步骤
-
-### Step A. 创建私有数据仓
-
-例如：`<your-user>/data_sync_analysis`（private）
-
-### Step B. 配置并部署 Worker
-
-1) 编辑 `cloudflare_worker/wrangler.toml`：
-
-- `GITHUB_OWNER`
-- `GITHUB_REPO`
-- `GITHUB_BRANCH`
-
-2) 设置 Worker secrets：
+在 Mac 上配置 `mac_push_health.sh`：
 
 ```bash
-cd cloudflare_worker
-wrangler secret put INGEST_KEY
-wrangler secret put GITHUB_TOKEN
+GITHUB_USER="your-github-username"
+GITHUB_REPO="xiaolu-data"
+GITHUB_TOKEN="ghp_xxxxxxxxxxxx"
 ```
 
-3) 部署：
+### 3. 首次导出数据
 
-```bash
-wrangler deploy
+```
+iPhone → 健康 App → 右上角头像 → 导出所有健康数据
+→ 保存 export.zip 到 Mac 桌面
+→ 运行 mac_push_health.sh
 ```
 
-### Step C. iOS Auto Export 配置
+### 4. 配置 HEARTBEAT.md
 
-- Export Format: `JSON`
-- Export Method: `REST API (POST)`
-- URL: `https://<your-worker-or-custom-domain>`
-- Header:
-  - Key: `X-Auth-Key`
-  - Value: 与 `INGEST_KEY` 一致
-- 日期范围（日报推荐）：`今天`
-
-> 说明：  
-> 为了“日报完整性优先”，建议使用 `今天` 全量快照，而不是 `Since Last Sync` 增量。  
-> `Since Last Sync` 需要更复杂的累积/去重逻辑，容易出现周期内指标缺失或口径漂移。
-
-### Step D. Agent 主机部署
-
-将本仓 `openclaw_agent/` 放到主机，例如：
-
-- `/root/applewatch-openclaw-health-adviser/openclaw_agent`
-
-准备环境变量文件 `/root/.health_pipeline.env`：
-
-```bash
-HEALTH_REPO_URL=https://github.com/<you>/<data-repo>.git
-HEALTH_REPO_BRANCH=main
-HEALTH_REPO_DIR=/root/.openclaw/workspace/health-data
-HEALTH_GITHUB_PAT=<github_pat_for_private_repo>
-SLEEP_SCORER_PATH=/root/codex
-MEAL_SKILL_PATH=/root/codex/skills/meal-intake-log/scripts/log_meal_text.py
-
-# Telegram (optional but recommended)
-TELEGRAM_BOT_TOKEN=<bot_token>
-TELEGRAM_CHAT_ID=<chat_id>
-```
-
-权限：
-
-```bash
-chmod 600 /root/.health_pipeline.env
-```
-
-### Step E. 首次手动验证
-
-```bash
-set -a; source /root/.health_pipeline.env; set +a
-/root/applewatch-openclaw-health-adviser/openclaw_agent/pull_and_score.sh
-```
-
-成功标志：
-
-- `data/report/latest_score.json`
-- `data/report/insights.json`
-- `data/report/daily_health_report.md`
-- 终端出现 `telegram_sent_ok`
-
-### Step F. 定时任务（推荐 systemd timer）
-
-```bash
-sudo install -m 644 systemd/health-pipeline.service /etc/systemd/system/health-pipeline.service
-sudo install -m 644 systemd/health-pipeline.timer /etc/systemd/system/health-pipeline.timer
-sudo install -m 644 systemd/health-reconcile.service /etc/systemd/system/health-reconcile.service
-sudo install -m 644 systemd/health-reconcile.timer /etc/systemd/system/health-reconcile.timer
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now health-pipeline.timer
-sudo systemctl enable --now health-reconcile.timer
-```
-
-查看下次触发：
-
-```bash
-systemctl list-timers --all | rg 'health-pipeline|health-reconcile'
-```
+复制 `docs/HEARTBEAT.md` 到你的 OpenClaw workspace，开启每日自动报告。
 
 ---
 
-## 7. 报告内容设计（已实现）
+## 📊 数据说明
 
-### 7.1 核心指标（多天自动取平均）
+### 重点指标
 
-- 静息心率
-- 最高/最低/平均心率
-- 血氧饱和度
-- 手腕温度
-- 睡眠总时长
-- 深度睡眠
-- REM（眼动）
-- 清醒时长
+**HRV（心率变异性）** — 最重要的指标
+- 反映自主神经系统平衡状态
+- 越高越好，但关键看**趋势**而非绝对值
+- 低于7日基线 5ms+ → 可能疲劳/压力大
+- 高于7日基线 5ms+ → 恢复良好，状态佳
 
-> 缺失数据自动输出 `N/A`，不会中断报告。
+**静息心率**
+- 正常范围 60-100 bpm
+- 长期偏高 → 关注睡眠和压力
+- 运动员通常 40-60 bpm
 
-### 7.2 自动告警
-
-- 熬夜告警（最近入睡晚于 00:30）
-- 节律偏移告警（Timing 低）
-- 睡眠债告警（均值偏低）
-
-### 7.3 饮食分析（有数据才显示）
-
-支持两种输入：
-
-1) 精确营养（推荐）
-- `data/diet/diet_log.csv`
-
-2) 自然语言（你只写吃了什么）
-- `data/diet/meal_text_log.csv`
-- 会自动估算热量/蛋白/碳水/脂肪，输出 `meal_text_estimated.csv`
-
-#### OpenClaw 自然语言录入示例
-
-在 OpenClaw 对话里可以用自然语言记录餐饮（由 Agent 落盘到 `meal_text_log.csv`）：
-
-```text
-今天中午吃了芹菜金针菇蛋汤、青椒牛柳、红烧鲫鱼、炒生菜、一小碗米饭
-```
-
-对应落盘格式：
-
-```csv
-timestamp,meal,description
-2026-03-17 12:30:00,lunch,芹菜金针菇蛋汤、青椒牛柳、红烧鲫鱼、炒生菜、一小碗米饭
-```
-
-然后在下一次 `pull_and_score.sh` 执行时自动完成：
-
-1. 菜品识别与营养估算（热量/蛋白/碳水/脂肪）
-2. 当日营养合理度评价（够不够、过不过）
-3. 纳入“饮食 × 睡眠”交叉分析与趋势报告
-
-#### 推荐触发方式（固定短句）
-
-建议在 OpenClaw 中统一使用前缀触发，降低歧义：
-
-```text
-记饮食：今天中午吃了芹菜金针菇蛋汤、青椒牛柳、红烧鲫鱼、炒生菜、一小碗米饭
-```
-
-Agent 处理约定：
-
-1. 去掉前缀 `记饮食：`
-2. 调用固定入口 `openclaw_agent/log_meal_from_text.sh` 落盘（内部调用 `meal-intake-log` skill）
-3. 可选立即触发一次 `pull_and_score.sh`（即时更新 Telegram 报告）
-
-固定入口命令（推荐）：
-
-```bash
-/root/applewatch-openclaw-health-adviser/openclaw_agent/log_meal_from_text.sh \
-  "记饮食：今天中午吃了芹菜金针菇蛋汤、青椒牛柳、红烧鲫鱼、炒生菜、一小碗米饭"
-```
-
-Skill 底层命令（脚本内部调用）：
-
-```bash
-python3 /root/codex/skills/meal-intake-log/scripts/log_meal_text.py \
-  --repo-dir /root/.openclaw/workspace/health-data \
-  --text "今天中午吃了芹菜金针菇蛋汤、青椒牛柳、红烧鲫鱼、炒生菜、一小碗米饭"
-```
-
-支持参数：
-
-- `--timestamp \"YYYY-mm-dd HH:MM:SS\"`（补录历史）
-- `--meal breakfast|lunch|dinner|snack|unspecified`（覆盖自动识别）
-
-固定入口脚本保证：
-
-- 必须写入 `data/diet/meal_text_log.csv`
-- 写入后校验 CSV 最后一行与脚本输出一致才回执成功
-- 避免“只写 memory 文件就回复已记录”的伪成功
-
-并自动做：
-
-- 当日营养搭配合理度评估
-- 近30天“热量 vs 睡眠评分”相关性
-
-### 7.4 周度/月度趋势
-
-- 近7天均分与前7天对比
-- 近30天均分与前30天对比
-
-### 7.5 数据完整性门槛（日报）
-
-- 报告内置“必需指标覆盖率”检查（例如 `sleepAnalysis/heartRate/stepCount/...`）
-- 输出字段：
-  - `data_quality.required_metric_coverage_pct`
-  - `data_quality.missing_required_metrics`
-  - `data_quality.status`
-- Telegram 推送支持门槛策略：
-  - 环境变量 `HEALTH_DAILY_MIN_COVERAGE_PCT`（默认 `80`）
-  - 低于阈值自动标记为“草稿：数据不完整”
+**节律评分**
+| 等级 | 分数 | 含义 |
+|------|------|------|
+| S | 90-100 | 最佳状态，全力冲 |
+| A | 80-89 | 状态好，正常安排 |
+| B+ | 75-79 | 不错，注意节奏 |
+| B | 65-74 | 一般，避免过度消耗 |
+| C | <65 | 注意休息恢复 |
 
 ---
 
-## 8. 运行与验收清单
+## 🔒 隐私说明
 
-1) Worker `tail` 能看到 `ingest_received` + `ingest_written`
-2) 数据仓出现：
-- `data/latest.json`
-- `data/archive/YYYY/MM/DD/*.json`
-3) Agent 侧生成：
-- `latest_score.json`
-- `insights.json`
-- `daily_health_report.md`
-4) Telegram 收到分列式报告（含 emoji）
-
-### Telegram 最终报告效果
-
-> Telegram收到最终报告效果
-
-![Telegram收到最终报告效果](docs/images/telegram-final-report.png)
+- 健康数据存储在**你自己的私有 GitHub 仓库**，小鹿不持有任何数据
+- OpenClaw 仅在分析时读取数据，不做持久化存储
+- 所有推送通过小红书 Hi，仅你可见
 
 ---
 
-## 9. 常见问题与修复
+## 🤝 Contributing
 
-### Q1. iOS 导出成功，但 GitHub 没更新
-
-看 Worker tail：
-
-- 若出现 `reject_too_large`：调大 `MAX_REQ_BYTES`
-- 若出现 `reject_auth`：`X-Auth-Key` 不匹配
-- 若 `ingest_written` 有但仓库不变：检查 `GITHUB_OWNER/GITHUB_REPO/BRANCH`
-
-### Q2. Telegram 推送失败
-
-- 检查 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`
-- Bot 是否已在目标聊天中收到过消息
-- 若使用 HTML parse mode，动态文本需转义（本仓已处理）
-
-### Q3. 报告指标缺失
-
-- 源数据本期不存在该指标时会显示 `N/A`
-- 不会中断主流程
+欢迎 PR！特别需要：
+- 更多健康指标支持（VO2 Max、血氧等）
+- 更好的图表可视化方案
+- iPhone Shortcuts 自动推送方案
 
 ---
 
-## 10. 安全建议
+## 📄 License
 
-- 所有 token 最小权限、短 TTL、定期轮换
-- 数据仓保持 private
-- 不在日志中打印明文密钥
-- 公开仓只保留模板和说明，不含敏感配置
+MIT © 2026 小鹿项目
 
 ---
 
-## 11. 一句话执行命令（主机）
-
-```bash
-set -a; source /root/.health_pipeline.env; set +a; /root/applewatch-openclaw-health-adviser/openclaw_agent/pull_and_score.sh
-```
-
-查看最新一次评分时间戳与分数（避免手写内联 Python）：
-
-```bash
-python3 /root/applewatch-openclaw-health-adviser/openclaw_agent/print_latest_score.py --repo-dir /root/.openclaw/workspace/health-data
-```
-
----
-
-## 12. 许可证
-
-建议 MIT（可自行添加 `LICENSE` 文件）
+<div align="center">
+  <br>
+  🦌 <strong>小鹿</strong> · 每天陪你把脉，不装医生，只做朋友
+  <br><br>
+  Built with ❤️ on <a href="https://openclaw.ai">OpenClaw</a>
+</div>
